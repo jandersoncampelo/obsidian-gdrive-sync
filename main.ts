@@ -14,6 +14,7 @@ import {
 
 import axios from "axios";
 import ShortUniqueId from "short-unique-id";
+import SyncState from "./syncState";
 import {
 	deleteFile,
 	getFile,
@@ -22,9 +23,9 @@ import {
 	getFoldersList,
 	getVaultId,
 	modifyFile,
-	renameFile,
-	uploadFile,
-	uploadFolder,
+        renameFile,
+        uploadFile,
+        uploadFolder,
 } from "./actions";
 
 const PENDING_SYNC_FILE_NAME = "pendingSync-gdrive-plugin";
@@ -209,6 +210,7 @@ export default class driveSyncPlugin extends Plugin {
 	adapter: FileSystemAdapter;
 	attachmentTrackingInitializationComplete: boolean = false;
 	layoutReady: boolean = false;
+	state: SyncState;
 
 	completeAllPendingSyncs = async () => {
 		if (!this.app.workspace.layoutReady) {
@@ -1502,6 +1504,8 @@ export default class driveSyncPlugin extends Plugin {
 	};
 
 	async onload() {
+		this.state = new SyncState(this.app.vault.adapter as FileSystemAdapter);
+		await this.state.load();
 		this.app.workspace.onLayoutReady(this.initFunction);
 		this.registerEvent(
 			this.app.vault.on("rename", async (newFile, oldpath) => {
