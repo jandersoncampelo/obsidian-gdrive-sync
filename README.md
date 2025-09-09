@@ -61,6 +61,25 @@ Configuring the plugin is straightforward:
 
 7. That's it! Enjoy auto sync :)
 
+
+## Migrating Existing Vaults
+If you already have a vault with notes and are enabling this plugin later, follow these steps:
+1. Enable the plugin and log in.
+2. Use **Initialize vault** in the plugin settings to upload existing files to Google Drive.
+3. The plugin creates a hidden `.gdrive-sync-state.json` file to track synchronization and removes any legacy metadata from older versions.
+4. On other devices, create a vault with the same name and install the plugin to download the synced files.
+
+## `.gdrive-sync-state.json`
+The plugin stores synchronization metadata in a hidden `.gdrive-sync-state.json` file at the root of your vault. Each entry maps a file path to an object containing the timestamp of its most recent synchronization:
+```json
+{
+  "path/to/file.md": {
+    "syncedAt": "2024-01-30T12:34:56.789Z"
+  }
+}
+```
+You generally do not need to edit this file. To restore it from a backup, copy the file into your vault. If it is missing and no backup is available, delete any remnants and the plugin will recreate it on the next sync, re-uploading files as needed.
+
 ## FAQs
 #### Q. Does this plgin work for Android/iOS?  
 Yes it does! The entire purpose of this plugin is to make sure that you have access to your notes no matter where you are and what device you are using. So how to install the plugin on:  
@@ -70,16 +89,14 @@ iOS: There's not a conventional way of installing these unofficial plugins on yo
 #### Q. Does the vault need to have the same name across devices?  
 A. Yes! The plug-in can be used to sync multiple vaults, and it uses the vault name to identify which vault is being currently worked on and need to be synced, you need to keep the vault name same across devices so that changes made under "sample-vault" on one device appears under "sample-vault" on your other devices as well. Once the vault has been initialized on one device you just need to create a vault with the same name on your other devices and install the plug-in on those devices and log-in. Everything would sync automatically after that.
   
-#### Q. What's the `lastSync: ...` thing under properties/tags?  
-The plugin keeps track of the last time the file was synced on a particular device using a "property" or YAML tag named `lastSync`. This keeps changing as the note is continuously synced. Please refrain from editing that tag. [Read more](https://github.com/stravo1/obsidian-gdrive-sync/issues/9#issuecomment-2026540794)
-
 #### Q. Why does filenames in Google Drive have the entire path of the note and why is the folder structure not recreated in Drive? / Why does it name files like the folder structure instead of just creating the folders?
 > TL;DR: It is not a bug, this is intended behaviour, having the folder structure in the filename directly is much simpler to work with in development compared to replicating folder structure in Drive as Obsidian has the capability to recreate folder structure from the filename.
 
 The Obsidian API can directly provide and construct the folder structure with just the pathname, so while storing in Drive the files are uploaded with their entire path as their filename instaed of creating actual folders. This reduces the complexity of managing folders and subfolders in Drive as everything is in the root vault folder and the filenames of the notes have enough info to reconstruct the actual vault. Obsidian can create all the folders in between if it is told to create a file named "SampleFolder/SubFolder/Test.md". It might look messy in Drive but it is assumed that you are gonna spend most of the time on working in Obsidian and not worry about how the sync is implemented in the backend :)
   
-#### ~Q. Why are my attachments being renamed?~ (SOLVED after [beta-13](https://github.com/stravo1/obsidian-gdrive-sync/releases/tag/v0.9.9-beta-13-fix-3))  
-If you are using a release older then beta-13 then the plugin renames the attachment to keep track of it: the attachments are renamed when they are uploaded because unlike in notes there's no "lastSync" tag that the plug-in can read from the note's content, so to differentiate between which attachments are synced and which are not it's renamed to "attachment_name-synced". I am actively trying to create a workaround for this, but it will take time. After [beta-13](https://github.com/stravo1/obsidian-gdrive-sync/releases/tag/v0.9.9-beta-13-fix-3) this is no more the case (read release notes).
+#### ~Q. Why are my attachments being renamed?~ (SOLVED after [beta-13](https://github.com/stravo1/obsidian-gdrive-sync/releases/tag/v0.9.9-beta-13-fix-3))
+If you are using a release older then beta-13 then the plugin renames attachments to keep track of them when they are uploaded. After [beta-13](https://github.com/stravo1/obsidian-gdrive-sync/releases/tag/v0.9.9-beta-13-fix-3) this is no more the case (read release notes).
+
 
 #### Q. Can I manually add files in Drive? / Does the plug-in track files manually added to the Drive folder? / Can I import files manually to the Drive folder?  
 Unfortunately no, for security reasons the plug-in has access to only those files that _it creates_, and it has been made such that all vaults stay under the "obsidian" folder in Drive, and it can only access those files that it has created under that folder to make sure that it is not tampering/reading other sensitive files that the user might have. Here's some techincal details: `.../auth/drive.appdata` and `...auth/drive.file` are the scopes the plug-in has access to.
@@ -112,11 +129,13 @@ In the plugins data.json file, include the following fields to the JSON object, 
 
   You must ensure that your server is sending back the correct CORS headers, if things aren't working thats probably the cause. Just log the request and determine the origin you need to allow.
 
-#### Q. Notes created from templates get deleted automatically. How to solve it?  
-The plug-in uses the "lastSync" tag to keep track of synced files. So if a new note having the "lastSync" tag of the template from which it was created is detected by the plug-in it assumes that this "new" note was already synced as it has the "lastSync" tag (which is not true as it got the tag from the template) and as it can't find this "new" note on Drive (of cource it can't, it was never uploaded) it deletes the note to keep it in sync with Drive. Solution is to add the name of the template note/folder containing templates under the Blacklist option in settings and remove the "lastSync" tag from the template note(s) if it(they) has(have) the tag. 
+#### Q. Notes created from templates get deleted automatically. How to solve it?
+Older versions stored sync metadata inside note content. When a new note inherited that metadata from a template, the plugin sometimes treated it as already synced and deleted it. If you run into similar issues, add the template folder to the blacklist in settings so that its contents are ignored during sync.
 
-#### Q. Files got deleted accidentally or due to plugin errors, what to do?  
-Do not panic, all files deleted by the plugin goes to the .trash folder in your vault folder in your desktop or mobile devices (provided you are using beta-11 or higher version of the plugin). You can get them from there. However for restoring them to the vault, do the following: disable this plugin, restore the required notes from .trash folder, remove the lastSync tag from the notes, enable plugin again. Not doing this will keep deleting the notes which were restored with the lastSync tag intact.
+
+#### Q. Files got deleted accidentally or due to plugin errors, what to do?
+Do not panic, all files deleted by the plugin goes to the .trash folder in your vault folder in your desktop or mobile devices (provided you are using beta-11 or higher version of the plugin). You can get them from there. However for restoring them to the vault, do the following: disable this plugin, restore the required notes from .trash folder, remove the corresponding entries from `.gdrive-sync-state.json`, then enable the plugin again.
+
 
 #### Q. Editor loses focus while editing tables, LateX expressions etc. What to do?  
 More detailed explanation can be found [here](https://github.com/stravo1/obsidian-gdrive-sync/issues/45#issuecomment-2356087828). You can temporarily enable force-focus mode by opening the Obsidian Command Palette and searching for "Toggle force focus" (you can also add a keybinding to this command). This ensures you don't lose focus while editing tables, LateX expressions. However enabling force-focus mode also introduces [#75](https://github.com/stravo1/obsidian-gdrive-sync/issues/75). So you can toggle it off when you face this issue. This option is also available in the plug-in settings. TLDR: Enable force-focus mode using the command palette while editing tables, LateX expression etc. else leave it disabled. 
