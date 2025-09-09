@@ -1446,22 +1446,44 @@ export default class driveSyncPlugin extends Plugin {
 		if (!this.settings.vaultInit) return;
 
 		/* extract new files to be down/uploaded */
-		this.settings.filesList.map((file) => this.cloudFiles.push(file.name));
-		this.app.vault
-			.getFiles()
-			.map((file) => this.localFiles.push(file.path));
+               this.settings.filesList.map((file) => this.cloudFiles.push(file.name));
+               this.app.vault
+                       .getFiles()
+                       .map((file) => this.localFiles.push(file.path));
 
-		//console.log(toUpload, toDownload);
-	};
+               //console.log(toUpload, toDownload);
+       };
 
-	async onload() {
-		this.state = new SyncState(this.app.vault.adapter as FileSystemAdapter);
-		await this.state.load();
-		this.app.workspace.onLayoutReady(this.initFunction);
-		this.registerEvent(
-			this.app.vault.on("rename", async (newFile, oldpath) => {
-				if (ignoreFiles.includes(newFile.path)) {
-					return;
+       async migrateFromFrontMatter() {
+               for (const file of this.app.vault.getFiles()) {
+                       if (file.extension !== "md") {
+                               continue;
+                       }
+                       const cache = this.app.metadataCache.getFileCache(file);
+                       const lastSync = cache?.frontmatter?.lastSync;
+                       if (!lastSync) {
+                               continue;
+                       }
+                       this.state.set(file.path, { lastSync });
+                       const content = await this.app.vault.read(file);
+                       const updated = content.replace(driveDataPattern, "\n");
+                       await this.app.vault.modify(file, updated);
+               }
+               await this.state.persist();
+       }
+
+       async onload() {
+               const adapter = this.app.vault.adapter as FileSystemAdapter;
+               this.state = new SyncState(adapter);
+               if (!(await adapter.exists(".gdrive-sync-state.json"))) {
+                       await this.migrateFromFrontMatter();
+               }
+               await this.state.load();
+               this.app.workspace.onLayoutReady(this.initFunction);
+               this.registerEvent(
+                       this.app.vault.on("rename", async (newFile, oldpath) => {
+                                if (ignoreFiles.includes(newFile.path)) {
+                                        return;
 				}
 				if (this.isInBlacklist(newFile)) {
 					return;
