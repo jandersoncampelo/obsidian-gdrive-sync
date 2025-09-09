@@ -170,7 +170,6 @@ const DEFAULT_SETTINGS: driveValues = {
 	//syncQueue: false,
 };
 
-const metaPattern = /^---\n[\s\S]*---/;
 const driveDataPattern = /\nlastSync:.*\n/;
 
 interface pendingSyncItemInterface {
@@ -321,19 +320,19 @@ export default class driveSyncPlugin extends Plugin {
 							let file = this.app.vault.getAbstractFileByPath(
 								finalNamesForFileIDMap.get(item.fileID!)!
 							);
-							if (file instanceof TFile) {
-								await this.updateLastSyncMetaTag(file);
-								var buffer = await this.app.vault.readBinary(
-									file
-								);
-								await modifyFile(
-									this.settings.accessToken,
-									uuidToFileIdMap.get(item.fileID)
-										? uuidToFileIdMap.get(item.fileID)
-										: item.fileID,
-									buffer
-								);
-							}
+                                                       if (file instanceof TFile) {
+                                                               var buffer = await this.app.vault.readBinary(
+                                                                       file
+                                                               );
+                                                               await modifyFile(
+                                                                       this.settings.accessToken,
+                                                                       uuidToFileIdMap.get(item.fileID)
+                                                                               ? uuidToFileIdMap.get(item.fileID)
+                                                                               : item.fileID,
+                                                                       buffer
+                                                               );
+                                                               await this.updateLastSyncMetaTag(file);
+                                                       }
 							await this.writeToVerboseLogFile(
 								"LOG: Modified file. [PS]"
 							);
@@ -789,32 +788,18 @@ export default class driveSyncPlugin extends Plugin {
 
 			new Notice("Uploading new file to Google Drive!");
 
-			var content = await this.app.vault.read(newFile);
-
-			var metaExists = metaPattern.test(content);
-			var driveDataExists = driveDataPattern.test(content);
-			if (!metaExists) {
-				await this.app.vault.modify(
-					newFile,
-					`---\nlastSync: ${new Date().toString()}\n---\n` + content
-				);
-			} else if (!driveDataExists) {
-				await this.app.vault.modify(
-					newFile,
-					content.replace(
-						/^---\n/g,
-						`---\nlastSync: ${new Date().toString()}\n`
-					)
-				);
-			}
-
-			var buffer: any = await this.app.vault.readBinary(newFile);
-			var id = await uploadFile(
-				this.settings.accessToken,
-				newFile.path,
-				buffer,
-				this.settings.vaultId
-			);
+                       var buffer: any = await this.app.vault.readBinary(newFile);
+                       var id = await uploadFile(
+                               this.settings.accessToken,
+                               newFile.path,
+                               buffer,
+                               this.settings.vaultId
+                       );
+                       this.state.set(newFile.path, {
+                               driveId: id,
+                               lastSync: new Date().toString(),
+                       });
+                       await this.state.persist();
 
 			this.writingFile = false;
 			this.cloudFiles.push(newFile.path);
@@ -862,28 +847,26 @@ export default class driveSyncPlugin extends Plugin {
 				var cloudDate = new Date(
 					this.settings.filesList[index].modifiedTime
 				);
-				var content: string;
-				var timeStamp: any;
-				var isBinaryFile: boolean = false;
+                               var timeStamp: any;
+                               var isBinaryFile: boolean = false;
 
-				if (file.extension != "md") {
-					isBinaryFile = true;
-					timeStamp = [file.stat.mtime];
-				} else {
-					content = await this.app.vault.cachedRead(file!);
-					timeStamp = content.match(/lastSync:.*/);
-				}
+                               if (file.extension != "md") {
+                                       isBinaryFile = true;
+                                       timeStamp = file.stat.mtime;
+                               } else {
+                                       timeStamp = this.state.get(file.path)?.lastSync;
+                               }
 
 				//console.log(cloudDate, new Date(timeStamp![0]));
 
 				if (
 					forced == "forced" ||
-					(timeStamp /* check if timeStamp is present */ &&
-						cloudDate.getTime() >
-							new Date(timeStamp![0]).getTime() +
-								(isBinaryFile
-									? 5000
-									: 3000)) /* allow 3sec/5sec (needs to be tested) delay in 'localDate' */
+                                       (timeStamp /* check if timeStamp is present */ &&
+                                               cloudDate.getTime() >
+                                                       new Date(timeStamp).getTime() +
+                                                               (isBinaryFile
+                                                                       ? 5000
+                                                                       : 3000)) /* allow 3sec/5sec (needs to be tested) delay in 'localDate' */
 				) {
 					if (
 						isBinaryFile &&
@@ -950,10 +933,10 @@ export default class driveSyncPlugin extends Plugin {
 				id = f.id;
 			}
 		});
-		if (file.extension == "md") await this.updateLastSyncMetaTag(file);
-		var buffer = await this.app.vault.readBinary(file);
-		await modifyFile(this.settings.accessToken, id, buffer);
-		await this.refreshFilesListInDriveAndStoreInSettings();
+               var buffer = await this.app.vault.readBinary(file);
+               await modifyFile(this.settings.accessToken, id, buffer);
+               if (file.extension == "md") await this.updateLastSyncMetaTag(file);
+               await this.refreshFilesListInDriveAndStoreInSettings();
 
 		this.statusBarItem.classList.replace("sync_icon", "sync_icon_still");
 		setIcon(this.statusBarItem, "checkmark");
@@ -1040,48 +1023,16 @@ export default class driveSyncPlugin extends Plugin {
 		await this.writeToVerboseLogFile("LOG: Exited uploadNewAttachment");
 	};
 
-	updateLastSyncMetaTag = async (e: TFile) => {
-		await this.writeToVerboseLogFile("LOG: Entering updateLastSyncMetaTag");
-		var content = await this.app.vault.read(e);
-
-		var metaExists = metaPattern.test(content);
-		var driveDataExists = driveDataPattern.test(content);
-		
-		const lastEditor = this.app.workspace.activeEditor;
-
-		if (metaExists) {
-			if (driveDataExists) {
-				await this.app.vault.modify(
-					e,
-					content.replace(
-						driveDataPattern,
-						`\nlastSync: ${new Date().toString()}\n`
-					)
-				);
-			} else {
-				await this.app.vault.modify(
-					e,
-					content.replace(
-						/^---\n/g,
-						`---\nlastSync: ${new Date().toString()}\n`
-					)
-				);
-			}
-		} else {
-			await this.app.vault.modify(
-				e,
-				`---\nlastSync: ${new Date().toString()}\n---\n` + content
-			);
-		}
-		if (
-			this.settings.forceFocus &&
-			lastEditor &&
-			!lastEditor.editor?.hasFocus()
-		) {
-			lastEditor?.editor?.focus();
-		}
-		await this.writeToVerboseLogFile("LOG: Exited updateLastSyncMetaTag");
-	};
+       updateLastSyncMetaTag = async (e: TFile) => {
+               await this.writeToVerboseLogFile("LOG: Entering updateLastSyncMetaTag");
+               const existing = this.state.get(e.path) || {};
+               this.state.set(e.path, {
+                       ...existing,
+                       lastSync: new Date().toString(),
+               });
+               await this.state.persist();
+               await this.writeToVerboseLogFile("LOG: Exited updateLastSyncMetaTag");
+       };
 
 	writeToPendingSyncFile = async () => {
 		await this.writeToVerboseLogFile(
@@ -1973,31 +1924,6 @@ export default class driveSyncPlugin extends Plugin {
 								setIcon(this.statusBarItem, "checkmark");
 								this.writingFile = false;
 								return;
-							}
-							let content = await this.app.vault.cachedRead(e);
-							let timeStamp =
-								e.extension == "md"
-									? content.match(/lastSync:.*/)
-									: false;
-							if (timeStamp) {
-								if (
-									Math.abs(
-										new Date(timeStamp[0]).getTime() -
-											new Date(e.stat.mtime).getTime()
-									) < 1000
-								) {
-									// same code repeated, deal with it later
-									console.log(
-										"ignoring modify trigger due to lastSyncTag updation"
-									);
-									this.statusBarItem.classList.replace(
-										"sync_icon",
-										"sync_icon_still"
-									);
-									setIcon(this.statusBarItem, "checkmark");
-									this.writingFile = false;
-									return;
-								}
 							}
 						}
 
